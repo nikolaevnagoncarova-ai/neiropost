@@ -83,7 +83,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     get_user(message.from_user.id)
     text = (
         "✨ <b>Добро пожаловать в ИИ-Редактор постов!</b>\n\n"
-        "🎙 <b>Опишите голосовым, о чем должен быть пост</b>, а я напишу живой, человеческий текст без штампов.\n\n"
+        "🎙 <b>Опишите голосовым, о чем должен быть пост</b>, а я напишу развернутый, живой текст без штампов.\n\n"
         "Выберите нужный раздел в меню ниже 👇"
     )
     await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
@@ -195,7 +195,7 @@ async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
     elif data == "menu_home":
         text = (
             "✨ <b>ИИ-Редактор постов</b>\n\n"
-            "🎙 Опишите голосовым, о чем должен быть пост, и получите живой текст."
+            "🎙 Опишите голосовым, о чем должен быть пост, и получите развернутый текст."
         )
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
         
@@ -229,7 +229,7 @@ async def action_handler(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.message(F.voice)
 async def handle_voice(message: types.Message):
-    processing_msg = await message.answer("🎙 <i>Слушаю аудио... Пишу живой текст...</i>", parse_mode="HTML")
+    processing_msg = await message.answer("🎙 <i>Слушаю аудио... Пишу развернутый текст...</i>", parse_mode="HTML")
     
     voice = message.voice
     file_info = await bot.get_file(voice.file_id)
@@ -251,33 +251,31 @@ async def handle_voice(message: types.Message):
             return
 
         prompt = (
-            "Ты — опытный автор Telegram-каналов. Перепиши разговорные мысли пользователя в качественный пост.\n"
+            "Ты — опытный автор популярных Telegram-каналов. Твоя задача — превратить разговорные мысли пользователя в полноценный, глубокий и подробный пост.\n"
             "ПРАВИЛА:\n"
-            "1. Абсолютно никаких клише («В современном мире», «Каждый из нас», «Важно отметить» и т.д.).\n"
-            "2. Пиши просто, емко и по делу, как живой человек в своем блоге. Минимум воды.\n"
-            "3. Используй ТОЛЬКО стандартную HTML-разметку Telegram: <b>жирный</b>, <i>курсив</i>, <code>код</code>, <blockquote>цитата</blockquote>.\n"
-            "4. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать тег <br> или любые другие теги переноса строк. Переносы делай обычным текстом через Enter (на новой строке).\n"
-            "5. Добавь аккуратные уместные эмодзи (не более 2-3 на весь текст).\n"
-            "6. Выдай строго чистый текст поста без кавычек и вступительных фраз.\n\n"
+            "1. Не сокращай мысли до пары строк. Раскрой тему подробно, добавь деталей, аргументов или уместных примеров, чтобы пост был объемным и интересным для чтения.\n"
+            "2. Абсолютно никаких клише («В современном мире», «Каждый из нас», «Важно отметить» и т.д.). Пиши живо, от первого или авторского лица.\n"
+            "3. Используй ТОЛЬКО стандартную HTML-разметку Telegram: <b>жирный</b> для акцентов, <i>курсив</i> для мыслей, <code>код</code>, <blockquote>цитата</blockquote>.\n"
+            "4. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать тег <br>. Делай абзацы обычным переносом строки через Enter.\n"
+            "5. Добавь уместные эмодзи (аккуратно, по смыслу).\n"
+            "6. Выдай строго чистый текст поста без кавычек и вступительных фраз от себя.\n\n"
             f"Мысли пользователя:\n{raw_text}"
         )
         
         response = await openai_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             temperature=0.7,
             messages=[{"role": "user", "content": prompt}]
         )
         
         final_text = response.choices[0].message.content.strip()
-        
-        # На всякий случай чистим возможные оставшиеся бр-теги
         final_text = final_text.replace("<br>", "").replace("<br/>", "").replace("<BR>", "")
         
         user = get_user(message.from_user.id)
         user["history_posts"].append(final_text)
         
         await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
-        await message.answer(final_text, parse_pers="HTML", reply_markup=get_post_keyboard())
+        await message.answer(final_text, parse_mode="HTML", reply_markup=get_post_keyboard())
         
     except Exception as e:
         logging.error(f"❌ Ошибка обработки: {e}")
