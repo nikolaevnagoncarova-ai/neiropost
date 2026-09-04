@@ -29,7 +29,7 @@ class ChannelStates(StatesGroup):
 
 users_db = {}
 
-def get_main_keyword():
+def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="👤 Профиль", callback_data="menu_profile"),
@@ -37,6 +37,9 @@ def get_main_keyword():
         ],
         [
             InlineKeyboardButton(text="⭐ Избранное", callback_data="menu_saved"),
+            InlineKeyboardButton(text="📜 История", callback_data="menu_history")
+        ],
+        [
             InlineKeyboardButton(text="💳 Подписка", callback_data="menu_buy")
         ]
     ])
@@ -58,6 +61,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="profile", description="Мой профиль"),
         BotCommand(command="channel", description="Привязать канал"),
         BotCommand(command="saved", description="Избранные посты"),
+        BotCommand(command="history", description="История постов"),
         BotCommand(command="buy", description="Купить подписку")
     ]
     await bot.set_my_commands(commands)
@@ -68,7 +72,8 @@ def get_user(user_id):
             "posts_left": 3,
             "is_vip": False,
             "channel": None,
-            "saved_posts": []
+            "saved_posts": [],
+            "history_posts": []
         }
     return users_db[user_id]
 
@@ -78,10 +83,10 @@ async def cmd_start(message: types.Message, state: FSMContext):
     get_user(message.from_user.id)
     text = (
         "✨ <b>Добро пожаловать в ИИ-Редактор постов!</b>\n\n"
-        "🎙 <b>Опишите голосовым, о чем должен быть пост</b>, а я превращу ваши мысли в профессиональную публикацию.\n\n"
+        "🎙 <b>Опишите голосовым, о чем должен быть пост</b>, а я напишу живой, человеческий текст без штампов.\n\n"
         "Выберите нужный раздел в меню ниже 👇"
     )
-    await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyword())
+    await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 @dp.message(Command("profile"))
 async def cmd_profile(message: types.Message, state: FSMContext):
@@ -97,7 +102,7 @@ async def cmd_profile(message: types.Message, state: FSMContext):
         f"• <b>Сохранено постов:</b> {len(user['saved_posts'])}\n\n"
         f"<i>Запишите голосовое сообщение, чтобы создать новый контент.</i>"
     )
-    await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyword())
+    await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 @dp.message(Command("channel"))
 async def cmd_channel(message: types.Message, state: FSMContext):
@@ -119,11 +124,11 @@ async def process_channel_input(message: types.Message, state: FSMContext):
         target = f"@{channel_username}" if channel_username else str(message.forward_origin.chat.id)
         user["channel"] = target
         await state.clear()
-        await message.answer(f"✅ Канал <b>{channel_title}</b> ({target}) успешно привязан!", parse_mode="HTML", reply_markup=get_main_keyword())
+        await message.answer(f"✅ Канал <b>{channel_title}</b> ({target}) успешно привязан!", parse_mode="HTML", reply_markup=get_main_keyboard())
     elif message.text and message.text.startswith("@"):
         user["channel"] = message.text.strip()
         await state.clear()
-        await message.answer(f"✅ Канал <b>{user['channel']}</b> успешно сохранен! Убедитесь, что бот добавлен в администраторы.", parse_mode="HTML", reply_markup=get_main_keyword())
+        await message.answer(f"✅ Канал <b>{user['channel']}</b> успешно сохранен! Убедитесь, что бот добавлен в администраторы.", parse_mode="HTML", reply_markup=get_main_keyboard())
     else:
         await message.answer("⚠️ Не удалось распознать канал. Перешлите сообщение из канала или отправьте юзернейм в формате <code>@channel</code>.", parse_mode="HTML")
 
@@ -132,15 +137,25 @@ async def cmd_saved(message: types.Message, state: FSMContext):
     await state.clear()
     user = get_user(message.from_user.id)
     if not user["saved_posts"]:
-        await message.answer("⭐ У вас пока нет сохраненных постов.", reply_markup=get_main_keyword())
+        await message.answer("⭐ У вас пока нет сохраненных постов.", reply_markup=get_main_keyboard())
         return
     text = "⭐ <b>Ваши избранные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["saved_posts"][-5:])
-    await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyword())
+    await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
+
+@dp.message(Command("history"))
+async def cmd_history(message: types.Message, state: FSMContext):
+    await state.clear()
+    user = get_user(message.from_user.id)
+    if not user["history_posts"]:
+        await message.answer("📜 Ваша история пуста. Вы еще не создавали посты.", reply_markup=get_main_keyboard())
+        return
+    text = "📜 <b>Последние сгенерированные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["history_posts"][-5:])
+    await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 @dp.message(Command("buy"))
 async def cmd_buy(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("💳 Модуль оплаты находится на финальной стадии интеграции.", reply_markup=get_main_keyword())
+    await message.answer("💳 Модуль оплаты находится на финальной стадии интеграции.", reply_markup=get_main_keyboard())
 
 @dp.callback_query(F.data.startswith("menu_"))
 async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
@@ -159,7 +174,7 @@ async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
             f"• <b>Канал:</b> {channel_name}\n"
             f"• <b>Сохранено постов:</b> {len(user['saved_posts'])}"
         )
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyword())
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
     elif data == "menu_channel":
         await state.set_state(ChannelStates.waiting_for_channel)
         await callback.message.answer("📢 Добавьте бота в админы канала и перешлите сюда любое сообщение из него или отправьте @username.")
@@ -168,15 +183,21 @@ async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
             await callback.answer("У вас пока нет сохраненных постов!", show_alert=True)
             return
         text = "⭐ <b>Ваши избранные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["saved_posts"][-5:])
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyword())
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
+    elif data == "menu_history":
+        if not user["history_posts"]:
+            await callback.answer("История пуста!", show_alert=True)
+            return
+        text = "📜 <b>Последние сгенерированные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["history_posts"][-5:])
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
     elif data == "menu_buy":
         await callback.message.answer("💳 Оплата временно недоступна.")
     elif data == "menu_home":
         text = (
             "✨ <b>ИИ-Редактор постов</b>\n\n"
-            "🎙 Опишите голосовым, о чем должен быть пост, и получите готовый текст."
+            "🎙 Опишите голосовым, о чем должен быть пост, и получите живой текст."
         )
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyword())
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
         
     await callback.answer()
 
@@ -208,7 +229,7 @@ async def action_handler(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.message(F.voice)
 async def handle_voice(message: types.Message):
-    processing_msg = await message.answer("🎙 <i>Слушаю аудио... Обрабатываю ваш запрос про пост...</i>", parse_mode="HTML")
+    processing_msg = await message.answer("🎙 <i>Слушаю аудио... Пишу живой текст...</i>", parse_mode="HTML")
     
     voice = message.voice
     file_info = await bot.get_file(voice.file_id)
@@ -229,25 +250,33 @@ async def handle_voice(message: types.Message):
             await message.answer("⚠️ Не удалось разобрать речь. Запишите голосовое еще раз.")
             return
 
+        # Жесткий системный промт для искоренения "нейросешести" (клише, воды, искусственных переходов)
         prompt = (
-            "Преврати этот разговорный текст в лаконичный, вовлекающий пост для Telegram-канала. "
-            "Сделай его средней длины: не слишком длинным, но емким и информативным. "
-            "ОБЯЗАТЕЛЬНО используй HTML-теги форматирования для Telegram: <b>жирный текст</b>, <i>курсив</i>, "
-            "цитаты через тег <blockquote>текст цитаты</blockquote>. "
-            "Добавь сильный заголовок, разбей текст на короткие абзацы и добавь уместные эмодзи. "
-            "Выдай ТОЛЬКО готовый текст поста без лишних вступительных фраз и без кавычек в начале и конце:\n\n" + raw_text
+            "Ты — профессиональный контент-мейкер и копирайтер с многолетним стажем. Твоя задача — переписать "
+            "голосовую мысль пользователя в пост для Telegram так, чтобы читатель ни в коем случае не догадался, что это писала нейросеть.\n\n"
+            "ЖЕСТКИЕ ПРАВИЛА:\n"
+            "1. Забудь про шаблонные фразы вроде «В современном мире», «Каждый из нас», «Важно отметить», «Помните, что», «Давайте разберем».\n"
+            "2. Никаких напыщенных вводных слов и искусственной восторженности с переизбытком смайликов. Эмодзи должны быть строго по делу, не более 2-3 штук на весь пост.\n"
+            "3. Пиши живым, разговорным, но грамотным языком реального человека, эксперта или автора блога. Короткие емкие предложения, честная интонация.\n"
+            "4. Структура: лаконичный сильный заголовок, 2-3 коротких абзаца по сути.\n"
+            "5. Естественное форматирование: используй <b>жирный текст</b> для выделения ключевой мысли и <i>курсив</i> для акцентов. Изредка можно использовать цитаты через <blockquote>текст</blockquote>.\n"
+            "6. Выдай исключительно чистый текст поста без кавычек и любых вводных реплик.\n\n"
+            f"Вот исходные мысли человека:\n{raw_text}"
         )
         
         response = await openai_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            temperature=0.4,
+            model="llama3-70b-8192",
+            temperature=0.7,
             messages=[{"role": "user", "content": prompt}]
         )
         
         final_text = response.choices[0].message.content.strip()
         
+        # Сохраняем в историю пользователя
+        user = get_user(message.from_user.id)
+        user["history_posts"].append(final_text)
+        
         await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
-        # Отправляем чистый текст постов без вводной фразы «Готовый пост:»
         await message.answer(final_text, parse_mode="HTML", reply_markup=get_post_keyboard())
         
     except Exception as e:
