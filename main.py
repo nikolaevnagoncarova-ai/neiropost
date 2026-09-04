@@ -83,7 +83,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     get_user(message.from_user.id)
     text = (
         "✨ <b>Добро пожаловать в ИИ-Редактор постов!</b>\n\n"
-        "🎙 <b>Опишите голосовым, о чем должен быть пост</b>, а я напишу развернутый, живой текст без штампов.\n\n"
+        "🎙 <b>Опишите голосовым любые мысли</b>, а я превращу их в глубокий, детальный и красивый пост с эмодзи.\n\n"
         "Выберите нужный раздел в меню ниже 👇"
     )
     await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
@@ -100,7 +100,7 @@ async def cmd_profile(message: types.Message, state: FSMContext):
         f"• <b>Доступно генераций:</b> {user['posts_left']}\n"
         f"• <b>Канал:</b> {channel_name}\n"
         f"• <b>Сохранено постов:</b> {len(user['saved_posts'])}\n\n"
-        f"<i>Запишите голосовое сообщение, чтобы создать новый контент.</i>"
+        f"<i>Запишите голосовое сообщение (даже длинное), чтобы создать новый контент.</i>"
     )
     await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
 
@@ -195,7 +195,7 @@ async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
     elif data == "menu_home":
         text = (
             "✨ <b>ИИ-Редактор постов</b>\n\n"
-            "🎙 Опишите голосовым, о чем должен быть пост, и получите развернутый текст."
+            "🎙 Опишите голосовым, о чем должен быть пост, и получите глубокий развернутый текст."
         )
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
         
@@ -229,7 +229,7 @@ async def action_handler(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.message(F.voice)
 async def handle_voice(message: types.Message):
-    processing_msg = await message.answer("🎙 <i>Слушаю аудио... Пишу развернутый текст...</i>", parse_mode="HTML")
+    processing_msg = await message.answer("🎙 <i>Слушаю аудио (обрабатываю любую длительность)... Создаю подробный пост с эмодзи ✨</i>", parse_mode="HTML")
     
     voice = message.voice
     file_info = await bot.get_file(voice.file_id)
@@ -238,6 +238,7 @@ async def handle_voice(message: types.Message):
     try:
         await bot.download_file(file_info.file_path, audio_file_path)
         
+        # Whisper обрабатывает файл целиком без каких-либо лимитов на продолжительность
         with open(audio_file_path, "rb") as audio_file:
             transcript = await openai_client.audio.transcriptions.create(
                 model="whisper-large-v3",
@@ -250,16 +251,17 @@ async def handle_voice(message: types.Message):
             await message.answer("⚠️ Не удалось разобрать речь. Запишите голосовое еще раз.")
             return
 
+        # Инструкция для подробного, структурированного поста с красивыми эмодзи
         prompt = (
-            "Ты — опытный автор популярных Telegram-каналов. Твоя задача — превратить разговорные мысли пользователя в полноценный, глубокий и подробный пост.\n"
+            "Ты — профессиональный топ-автор и редактор Telegram-каналов. Твоя задача — превратить мысли пользователя из аудио в глубокий, развёрнутый, структурированный и интересный пост.\n"
             "ПРАВИЛА:\n"
-            "1. Не сокращай мысли до пары строк. Раскрой тему подробно, добавь деталей, аргументов или уместных примеров, чтобы пост был объемным и интересным для чтения.\n"
-            "2. Абсолютно никаких клише («В современном мире», «Каждый из нас», «Важно отметить» и т.д.). Пиши живо, от первого или авторского лица.\n"
+            "1. Не сокращай текст до пары строк. Раскрой тему максимально подробно, добавь деталей, аргументов или вовлекающих рассуждений.\n"
+            "2. Абсолютно никаких избитых клише («В современном мире», «Каждый из нас», «Важно отметить» и т.п.). Пиши живо, от первого или авторского лица.\n"
             "3. Используй ТОЛЬКО стандартную HTML-разметку Telegram: <b>жирный</b> для акцентов, <i>курсив</i> для мыслей, <code>код</code>, <blockquote>цитата</blockquote>.\n"
-            "4. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать тег <br>. Делай абзацы обычным переносом строки через Enter.\n"
-            "5. Добавь уместные эмодзи (аккуратно, по смыслу).\n"
-            "6. Выдай строго чистый текст поста без кавычек и вступительных фраз от себя.\n\n"
-            f"Мысли пользователя:\n{raw_text}"
+            "4. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать тег <br>. Делай абзацы исключительно через обычный перенос строки (Enter).\n"
+            "5. Гармонично и красиво расставь современные эмодзи по тексту (в уместных местах, чтобы они подчеркивали суть, но не перегружали).\n"
+            "6. Выдай строго чистый готовый текст поста без кавычек и вводных фраз от себя.\n\n"
+            f"Мысли из голосового:\n{raw_text}"
         )
         
         response = await openai_client.chat.completions.create(
