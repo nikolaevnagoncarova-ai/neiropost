@@ -8,146 +8,197 @@ from aiogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from openai import AsyncOpenAI
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
-# Получение переменных окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 if not BOT_TOKEN or not GROQ_API_KEY or not WEBHOOK_URL:
-    logging.error("❌ Не заданы обязательные переменные окружения (BOT_TOKEN, GROQ_API_KEY, WEBHOOK_URL)!")
+    logging.error("❌ Не заданы обязательные переменные окружения!")
     sys.exit(1)
 
-# Инициализация бота и клиентов
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 openai_client = AsyncOpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
 
-# Простая база данных в памяти (для примера)
-user_data = {}
+# Продвинутая база данных в памяти для пользователей и их постов
+users_db = {}
 
 def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="👤 Профиль", callback_data="btn_profile"),
-            InlineKeyboardButton(text="📢 Канал", callback_data="btn_channel")
+            InlineKeyboardButton(text="👤 Профиль", callback_data="menu_profile"),
+            InlineKeyboardButton(text="📢 Канал", callback_data="menu_channel")
         ],
         [
-            InlineKeyboardButton(text="💳 Купить подписку", callback_data="btn_buy")
+            InlineKeyboardButton(text="⭐ Избранные посты", callback_data="menu_saved"),
+            InlineKeyboardButton(text="💳 Подписка", callback_data="menu_buy")
+        ]
+    ])
+
+def get_post_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💾 Сохранить в избранное", callback_data="action_save"),
+            InlineKeyboardButton(text="📢 Опубликовать", callback_data="action_publish")
+        ],
+        [
+            InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu_home")
         ]
     ])
 
 async def set_bot_commands(bot: Bot):
     commands = [
-        BotCommand(command="start", description="Запустить бота"),
-        BotCommand(command="profile", description="Мой профиль и подписка"),
+        BotCommand(command="start", description="Главное меню"),
+        BotCommand(command="profile", description="Мой профиль"),
         BotCommand(command="channel", description="Привязать канал"),
-        BotCommand(command="buy", description="Оформить подписку")
+        BotCommand(command="saved", description="Избранные посты"),
+        BotCommand(command="buy", description="Купить подписку")
     ]
     await bot.set_my_commands(commands)
 
+def get_user(user_id):
+    if user_id not in users_db:
+        users_db[user_id] = {
+            "posts_left": 3,
+            "is_vip": False,
+            "channel": "Не привязан",
+            "saved_posts": []
+        }
+    return users_db[user_id]
+
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    user_id = message.from_user.id
-    if user_id not in user_data:
-        user_data[user_id] = {"posts_left": 3, "is_vip": False, "channel": "Не привязан"}
-    
+    get_user(message.from_user.id)
     text = (
-        "👋 <b>Привет! Я твой личный ИИ-редактор.</b>\n\n"
-        "🎙 Отправь мне голосовое сообщение, и я мгновенно превращу его "
-        "в структурированный, красивый пост с абзацами и эмодзи для твоего Telegram-канала!"
+        "✨ <b>Добро пожаловать в ИИ-Редактор постов!</b>\n\n"
+        "🎙 <b>Опишите голосовым, о чем должен быть пост</b>, а я превращу ваши мысли в профессиональную, структурированную публикацию с идеальными абзацами и эмодзи.\n\n"
+        "Выберите нужный раздел в меню ниже 👇"
     )
     await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 @dp.message(Command("profile"))
 async def cmd_profile(message: types.Message):
-    user_id = message.from_user.id
-    data = user_data.get(user_id, {"posts_left": 3, "is_vip": False, "channel": "Не привязан"})
-    
-    status = "👑 VIP (Безлимит)" if data["is_vip"] else "⏳ Базовый"
+    user = get_user(message.from_user.id)
+    status = "👑 VIP (Безлимит)" if user["is_vip"] else "⏳ Базовый статус"
     text = (
-        f"<b>👤 Твой профиль:</b>\n\n"
-        f"• Статус подписки: {status}\n"
-        f"• Бесплатные посты: {data['posts_left']}\n"
-        f"• Привязанный канал: {data['channel']}"
+        f"<b>👤 Личный кабинет</b>\n\n"
+        f"• <b>Статус:</b> {status}\n"
+        f"• <b>Доступно генераций:</b> {user['posts_left']}\n"
+        f"• <b>Канал:</b> {user['channel']}\n"
+        f"• <b>Сохранено постов:</b> {len(user['saved_posts'])}\n\n"
+        f"<i>Запишите голосовое со словами «Опишите о чем должен быть пост», чтобы создать новый контент.</i>"
     )
     await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 @dp.message(Command("channel"))
 async def cmd_channel(message: types.Message):
-    await message.answer("📢 Отправь мне @username твоего канала (например, <code>@my_channel</code>), чтобы привязать его.", parse_mode="HTML")
+    await message.answer("📢 Отправьте мне @username вашего канала (например, <code>@my_channel</code>), чтобы привязать его для публикаций.", parse_mode="HTML")
+
+@dp.message(Command("saved"))
+async def cmd_saved(message: types.Message):
+    user = get_user(message.from_user.id)
+    if not user["saved_posts"]:
+        await message.answer("⭐ У вас пока нет сохраненных постов. Нажмите кнопку «Сохранить в избранное» под любым сгенерированным текстом!", reply_markup=get_main_keyboard())
+        return
+    
+    text = "⭐ <b>Ваши избранные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["saved_posts"][-5:])
+    await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 @dp.message(Command("buy"))
 async def cmd_buy(message: types.Message):
-    await message.answer("💳 Модуль оплаты находится в разработке. Скоро здесь появится возможность оформить VIP-подписку!")
+    await message.answer("💳 Модуль оплаты находится на финальной стадии интеграции. Скоро здесь появится возможность подключить VIP-подписку в один клик!", reply_markup=get_main_keyboard())
 
-@dp.callback_query(F.data.startswith("btn_"))
-async def callback_handler(callback: types.CallbackQuery):
+# Обработка инлайн-кнопок
+@dp.callback_query(F.data.startswith("menu_"))
+async def menu_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    data = user_data.get(user_id, {"posts_left": 3, "is_vip": False, "channel": "Не привязан"})
+    user = get_user(user_id)
+    data = callback.data
     
-    if callback.data == "btn_profile":
-        status = "👑 VIP (Безлимит)" if data["is_vip"] else "⏳ Базовый"
+    if data == "menu_profile":
+        status = "👑 VIP (Безлимит)" if user["is_vip"] else "⏳ Базовый статус"
         text = (
-            f"<b>👤 Твой профиль:</b>\n\n"
-            f"• Статус подписки: {status}\n"
-            f"• Бесплатные посты: {data['posts_left']}\n"
-            f"• Привязанный канал: {data['channel']}"
+            f"<b>👤 Личный кабинет</b>\n\n"
+            f"• <b>Статус:</b> {status}\n"
+            f"• <b>Доступно генераций:</b> {user['posts_left']}\n"
+            f"• <b>Канал:</b> {user['channel']}\n"
+            f"• <b>Сохранено постов:</b> {len(user['saved_posts'])}"
         )
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
-    elif callback.data == "btn_channel":
-        await callback.message.answer("📢 Отправь мне @username твоего канала, чтобы привязать его.")
-    elif callback.data == "btn_buy":
+    elif data == "menu_channel":
+        await callback.message.answer("📢 Отправьте мне @username вашего канала для привязки.")
+    elif data == "menu_saved":
+        if not user["saved_posts"]:
+            await callback.answer("У вас пока нет сохраненных постов!", show_alert=True)
+            return
+        text = "⭐ <b>Ваши избранные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["saved_posts"][-5:])
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
+    elif data == "menu_buy":
         await callback.message.answer("💳 Оплата временно недоступна.")
-    
+    elif data == "menu_home":
+        text = (
+            "✨ <b>ИИ-Редактор постов</b>\n\n"
+            "🎙 Опишите голосовым, о чем должен быть пост, и получите готовый текст."
+        )
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
+        
     await callback.answer()
+
+@dp.callback_query(F.data.startswith("action_"))
+async def action_handler(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    user = get_user(user_id)
+    
+    if callback.data == "action_save":
+        post_text = callback.message.text
+        if post_text not in user["saved_posts"]:
+            user["saved_posts"].append(post_text)
+            await callback.answer("✅ Пост успешно сохранен в избранное!", show_alert=True)
+        else:
+            await callback.answer("ℹ️ Этот пост уже есть в вашем избранном.", show_alert=True)
+    elif callback.data == "action_publish":
+        await callback.answer("📢 Функция публикации будет доступна сразу после привязки канала!", show_alert=True)
 
 @dp.message(F.voice)
 async def handle_voice(message: types.Message):
-    processing_msg = await message.answer("🎙 <i>Слушаю голосовое и расшифровываю...</i>", parse_mode="HTML")
+    processing_msg = await message.answer("🎙 <i>Слушаю аудио... Опишите о чем должен быть пост — обрабатываю запрос...</i>", parse_mode="HTML")
     
     voice = message.voice
     file_info = await bot.get_file(voice.file_id)
-    file_path = file_info.file_path
-    
     audio_file_path = f"voice_{message.from_user.id}.ogg"
     
     try:
-        await bot.download_file(file_path, audio_file_path)
+        await bot.download_file(file_info.file_path, audio_file_path)
         
-        # 1. Распознавание речи через Whisper
         with open(audio_file_path, "rb") as audio_file:
             transcript = await openai_client.audio.transcriptions.create(
                 model="whisper-large-v3",
                 file=audio_file
             )
         
-        raw_text = transcript.text
-        
-        if not raw_text.strip():
+        raw_text = transcript.text.strip()
+        if not raw_text:
             await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
-            await message.answer("⚠️ Не удалось разобрать слова в голосовом сообщении. Попробуй записать еще раз четче.")
+            await message.answer("⚠️ Не удалось разобрать речь. Пожалуйста, запишите голосовое сообщение еще раз.")
             return
 
-        # 2. Генерация качественного поста через Llama 3
         prompt = (
-            "Преврати этот разговорный текст в красивый, профессиональный и вовлекающий пост для Telegram-канала. "
-            "Добавь уместные абзацы, выдели главные мысли и добавь подходящие эмодзи, сохранив при этом исходный смысл:\n\n" + raw_text
+            "Преврати этот разговорный текст в премиальный, вовлекающий и чистый пост для Telegram-канала. "
+            "Опираясь на то, о чем просит пользователь, сделай сильный заголовок, разбей текст на короткие абзацы и добавь уместные эмодзи:\n\n" + raw_text
         )
         
         response = await openai_client.chat.completions.create(
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
             temperature=0.4,
             messages=[{"role": "user", "content": prompt}]
         )
         
         final_text = response.choices[0].message.content
         
-        # Удаляем сообщение о загрузке и отправляем результат
         await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
-        await message.answer(f"✨ <b>Готовый пост для канала:</b>\n\n{final_text}", parse_mode="HTML", reply_markup=get_main_keyboard())
+        await message.answer(f"✨ <b>Готовый пост:</b>\n\n{final_text}", parse_mode="HTML", reply_markup=get_post_keyboard())
         
     except Exception as e:
         logging.error(f"❌ Ошибка обработки: {e}")
@@ -155,9 +206,8 @@ async def handle_voice(message: types.Message):
             await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
         except:
             pass
-        await message.answer("❌ Произошла ошибка при обработке запроса. Попробуй отправить аудио немного покороче.")
+        await message.answer("❌ Произошла ошибка при генерации. Попробуйте записать более короткое сообщение.")
     finally:
-        # Гарантированное удаление временного файла
         if os.path.exists(audio_file_path):
             os.remove(audio_file_path)
 
