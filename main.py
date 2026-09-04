@@ -262,7 +262,7 @@ async def handle_voice(message: types.Message):
         )
         
         response = await openai_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-20b",
             temperature=0.7,
             messages=[{"role": "user", "content": prompt}]
         )
