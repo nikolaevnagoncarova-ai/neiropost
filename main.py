@@ -231,22 +231,24 @@ async def handle_voice(message: types.Message):
 
         prompt = (
             "Преврати этот разговорный текст в лаконичный, вовлекающий пост для Telegram-канала. "
-            "Сделай его оптимальной длины: не слишком длинным, но емким. "
-            "Обязательно используй Markdown-форматирование для Telegram (например, **жирный текст**, <i>курсив</i>, "
-            "цитаты через знак > или блоки кода при необходимости). Сделай цепляющий заголовок, разбей текст на короткие абзацы "
-            "и добавь уместные эмодзи:\n\n" + raw_text
+            "Сделай его средней длины: не слишком длинным, но емким и информативным. "
+            "ОБЯЗАТЕЛЬНО используй HTML-теги форматирования для Telegram: <b>жирный текст</b>, <i>курсив</i>, "
+            "цитаты через тег <blockquote>текст цитаты</blockquote>. "
+            "Добавь сильный заголовок, разбей текст на короткие абзацы и добавь уместные эмодзи. "
+            "Выдай ТОЛЬКО готовый текст поста без лишних вступительных фраз и без кавычек в начале и конце:\n\n" + raw_text
         )
         
         response = await openai_client.chat.completions.create(
-            model="openai/gpt-oss-20b",
+            model="llama-3.1-8b-instant",
             temperature=0.4,
             messages=[{"role": "user", "content": prompt}]
         )
         
-        final_text = response.choices[0].message.content
+        final_text = response.choices[0].message.content.strip()
         
         await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
-        await message.answer(f"✨ <b>Готовый пост:</b>\n\n{final_text}", parse_mode="HTML", reply_markup=get_post_keyboard())
+        # Отправляем чистый текст постов без вводной фразы «Готовый пост:»
+        await message.answer(final_text, parse_mode="HTML", reply_markup=get_post_keyboard())
         
     except Exception as e:
         logging.error(f"❌ Ошибка обработки: {e}")
