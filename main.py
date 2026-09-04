@@ -1,26 +1,27 @@
 import os
 import logging
 import sys
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from openai import AsyncOpenAI
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-if not BOT_TOKEN or not GROQ_API_KEY:
-    logging.error("Не заданы BOT_TOKEN или GROQ_API_KEY в переменных окружения!")
+if not BOT_TOKEN or not GROQ_API_KEY or not WEBHOOK_URL:
+    logging.error("Не заданы обязательные переменные окружения!")
     sys.exit(1)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 openai_client = AsyncOpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
 
-# Хранилище данных пользователей в памяти (для примера)
 user_data = {}
 
 def get_main_keyboard():
@@ -30,7 +31,6 @@ def get_main_keyboard():
         [InlineKeyboardButton(text="💳 Купить подписку", callback_data="btn_buy")]
     ])
 
-# Установка подсказок команд (меню в Telegram при вводе "/")
 async def set_bot_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="Запустить бота"),
@@ -74,7 +74,6 @@ async def cmd_channel(message: types.Message):
 async def cmd_buy(message: types.Message):
     await message.answer("Оплата пока в разработке, но скоро здесь появится кнопка пополнения!")
 
-# Обработка нажатий на инлайн-кнопки
 @dp.callback_query(F.data.startswith("btn_"))
 async def callback_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -96,7 +95,6 @@ async def callback_handler(callback: types.CallbackQuery):
     
     await callback.answer()
 
-# Обработка голосовых сообщений
 @dp.message(F.voice)
 async def handle_voice(message: types.Message):
     processing_msg = await message.answer("🎙 Слушаю голосовое и расшифровываю...")
@@ -140,10 +138,14 @@ async def handle_voice(message: types.Message):
         if os.path.exists(audio_file_path):
             os.remove(audio_file_path)
 
-async def main():
+async def on_startup(bot: Bot):
+    await bot.set_webhook(WEBHOOK_URL)
     await set_bot_commands(bot)
-    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    app = web.Application()
+    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path="/")
+    setup_application(app, dp, bot=bot)
+    dp.startup.register(on_startup)
+    port = int(os.environ.get("PORT", 8080))
+    web.run_app(app, host="0.0.0.0", port=port)
