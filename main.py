@@ -5,6 +5,8 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from openai import AsyncOpenAI
 
@@ -22,7 +24,10 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 openai_client = AsyncOpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
 
-# Продвинутая база данных в памяти для пользователей и их постов
+# Состояния для FSM (привязка канала)
+class ChannelStates(StatesGroup):
+    waiting_for_channel = State()
+
 users_db = {}
 
 def get_main_keyboard():
@@ -32,7 +37,7 @@ def get_main_keyboard():
             InlineKeyboardButton(text="📢 Канал", callback_data="menu_channel")
         ],
         [
-            InlineKeyboardButton(text="⭐ Избранные посты", callback_data="menu_saved"),
+            InlineKeyboardButton(text="⭐ Избранное", callback_data="menu_saved"),
             InlineKeyboardButton(text="💳 Подписка", callback_data="menu_buy")
         ]
     ])
@@ -40,7 +45,7 @@ def get_main_keyboard():
 def get_post_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="💾 Сохранить в избранное", callback_data="action_save"),
+            InlineKeyboardButton(text="💾 В избранное", callback_data="action_save"),
             InlineKeyboardButton(text="📢 Опубликовать", callback_data="action_publish")
         ],
         [
@@ -69,17 +74,19 @@ def get_user(user_id):
     return users_db[user_id]
 
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message):
+async def cmd_start(message: types.Message, state: FSMContext):
+    await state.clear()
     get_user(message.from_user.id)
     text = (
         "✨ <b>Добро пожаловать в ИИ-Редактор постов!</b>\n\n"
-        "🎙 <b>Опишите голосовым, о чем должен быть пост</b>, а я превращу ваши мысли в профессиональную, структурированную публикацию с идеальными абзацами и эмодзи.\n\n"
+        "🎙 <b>Опишите голосовым, о чем должен быть пост</b>, а я превращу ваши мысли в профессиональную публикацию с идеальными абзацами и эмодзи.\n\n"
         "Выберите нужный раздел в меню ниже 👇"
     )
     await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 @dp.message(Command("profile"))
-async def cmd_profile(message: types.Message):
+async def cmd_profile(message: types.Message, state: FSMContext):
+    await state.clear()
     user = get_user(message.from_user.id)
     status = "👑 VIP (Безлимит)" if user["is_vip"] else "⏳ Базовый статус"
     text = (
@@ -93,26 +100,50 @@ async def cmd_profile(message: types.Message):
     await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 @dp.message(Command("channel"))
-async def cmd_channel(message: types.Message):
-    await message.answer("📢 Отправьте мне @username вашего канала (например, <code>@my_channel</code>), чтобы привязать его для публикаций.", parse_mode="HTML")
+async def cmd_channel(message: types.Message, state: FSMContext):
+    await state.set_state(ChannelStates.waiting_for_channel)
+    await message.answer(
+        "📢 <b>Привязка канала:</b>\n\n"
+        "1. Добавьте этого бота в администраторы вашего канала (с правом публикации).\n"
+        "2. Перешлите сюда любое сообщение из вашего канала ИЛИ отправьте его юзернейм (например, <code>@my_channel</code>).",
+        parse_mode="HTML"
+    )
+
+@dp.message(ChannelStates.waiting_for_channel)
+async def process_channel_input(message: types.Message, state: FSMContext):
+    user = get_user(message.from_user.id)
+    
+    if message.forward_origin and message.forward_origin.type == "channel":
+        channel_title = message.forward_origin.chat.title
+        channel_id = str(message.forward_origin.chat.id)
+        user["channel"] = f"{channel_title} ({channel_id})"
+        await state.clear()
+        await message.answer(f"✅ Канал <b>{channel_title}</b> успешно привязан!", parse_mode="HTML", reply_markup=get_main_keyboard())
+    elif message.text and message.text.startswith("@"):
+        user["channel"] = message.text.strip()
+        await state.clear()
+        await message.answer(f"✅ Канал <b>{user['channel']}</b> успешно сохранен! Убедитесь, что бот добавлен в администраторы.", parse_mode="HTML", reply_markup=get_main_keyboard())
+    else:
+        await message.answer("⚠️ Не удалось распознать канал. Перешлите сообщение из канала или отправьте юзернейм в формате <code>@channel</code>.", parse_mode="HTML")
 
 @dp.message(Command("saved"))
-async def cmd_saved(message: types.Message):
+async def cmd_saved(message: types.Message, state: FSMContext):
+    await state.clear()
     user = get_user(message.from_user.id)
     if not user["saved_posts"]:
-        await message.answer("⭐ У вас пока нет сохраненных постов. Нажмите кнопку «Сохранить в избранное» под любым сгенерированным текстом!", reply_markup=get_main_keyboard())
+        await message.answer("⭐ У вас пока нет сохраненных постов.", reply_markup=get_main_keyboard())
         return
-    
     text = "⭐ <b>Ваши избранные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["saved_posts"][-5:])
     await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 @dp.message(Command("buy"))
-async def cmd_buy(message: types.Message):
-    await message.answer("💳 Модуль оплаты находится на финальной стадии интеграции. Скоро здесь появится возможность подключить VIP-подписку в один клик!", reply_markup=get_main_keyboard())
+async def cmd_buy(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("💳 Модуль оплаты находится на финальной стадии интеграции.", reply_markup=get_main_keyboard())
 
-# Обработка инлайн-кнопок
 @dp.callback_query(F.data.startswith("menu_"))
-async def menu_handler(callback: types.CallbackQuery):
+async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
     user_id = callback.from_user.id
     user = get_user(user_id)
     data = callback.data
@@ -128,7 +159,8 @@ async def menu_handler(callback: types.CallbackQuery):
         )
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
     elif data == "menu_channel":
-        await callback.message.answer("📢 Отправьте мне @username вашего канала для привязки.")
+        await state.set_state(ChannelStates.waiting_for_channel)
+        await callback.message.answer("📢 Добавьте бота в админы канала и перешлите сюда любое сообщение из него или отправьте @username.")
     elif data == "menu_saved":
         if not user["saved_posts"]:
             await callback.answer("У вас пока нет сохраненных постов!", show_alert=True)
@@ -155,15 +187,15 @@ async def action_handler(callback: types.CallbackQuery):
         post_text = callback.message.text
         if post_text not in user["saved_posts"]:
             user["saved_posts"].append(post_text)
-            await callback.answer("✅ Пост успешно сохранен в избранное!", show_alert=True)
+            await callback.answer("✅ Успешно сохранено!", show_alert=True)
         else:
-            await callback.answer("ℹ️ Этот пост уже есть в вашем избранном.", show_alert=True)
+            await callback.answer("ℹ️ Пост уже в избранном.", show_alert=True)
     elif callback.data == "action_publish":
-        await callback.answer("📢 Функция публикации будет доступна сразу после привязки канала!", show_alert=True)
+        await callback.answer("📢 Публикация будет доступна после привязки канала!", show_alert=True)
 
 @dp.message(F.voice)
 async def handle_voice(message: types.Message):
-    processing_msg = await message.answer("🎙 <i>Слушаю аудио... Опишите о чем должен быть пост — обрабатываю запрос...</i>", parse_mode="HTML")
+    processing_msg = await message.answer("🎙 <i>Слушаю аудио... Обрабатываю ваш запрос про пост...</i>", parse_mode="HTML")
     
     voice = message.voice
     file_info = await bot.get_file(voice.file_id)
@@ -181,7 +213,7 @@ async def handle_voice(message: types.Message):
         raw_text = transcript.text.strip()
         if not raw_text:
             await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
-            await message.answer("⚠️ Не удалось разобрать речь. Пожалуйста, запишите голосовое сообщение еще раз.")
+            await message.answer("⚠️ Не удалось разобрать речь. Запишите голосовое еще раз.")
             return
 
         prompt = (
@@ -206,7 +238,7 @@ async def handle_voice(message: types.Message):
             await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
         except:
             pass
-        await message.answer("❌ Произошла ошибка при генерации. Попробуйте записать более короткое сообщение.")
+        await message.answer(f"❌ Ошибка генерации: {str(e)[:100]}")
     finally:
         if os.path.exists(audio_file_path):
             os.remove(audio_file_path)
