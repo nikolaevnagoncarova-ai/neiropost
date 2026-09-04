@@ -24,7 +24,6 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 openai_client = AsyncOpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
 
-# Состояния для FSM (привязка канала)
 class ChannelStates(StatesGroup):
     waiting_for_channel = State()
 
@@ -222,7 +221,7 @@ async def handle_voice(message: types.Message):
         )
         
         response = await openai_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama3-8b-8192",
             temperature=0.4,
             messages=[{"role": "user", "content": prompt}]
         )
