@@ -255,25 +255,29 @@ async def handle_voice(message: types.Message):
             "ПРАВИЛА:\n"
             "1. Абсолютно никаких клише («В современном мире», «Каждый из нас», «Важно отметить» и т.д.).\n"
             "2. Пиши просто, емко и по делу, как живой человек в своем блоге. Минимум воды.\n"
-            "3. Используй HTML-разметку: <b>жирный текст</b> для главного акцента, <i>курсив</i> для деталей, изредка цитаты <blockquote>текст</blockquote>.\n"
-            "4. Добавь аккуратные уместные эмодзи (не более 2-3 на весь текст).\n"
-            "5. Выдай строго чистый текст поста без кавычек и вступительных фраз.\n\n"
+            "3. Используй ТОЛЬКО стандартную HTML-разметку Telegram: <b>жирный</b>, <i>курсив</i>, <code>код</code>, <blockquote>цитата</blockquote>.\n"
+            "4. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать тег <br> или любые другие теги переноса строк. Переносы делай обычным текстом через Enter (на новой строке).\n"
+            "5. Добавь аккуратные уместные эмодзи (не более 2-3 на весь текст).\n"
+            "6. Выдай строго чистый текст поста без кавычек и вступительных фраз.\n\n"
             f"Мысли пользователя:\n{raw_text}"
         )
         
         response = await openai_client.chat.completions.create(
-            model="openai/gpt-oss-20b",
+            model="llama-3.1-8b-instant",
             temperature=0.7,
             messages=[{"role": "user", "content": prompt}]
         )
         
         final_text = response.choices[0].message.content.strip()
         
+        # На всякий случай чистим возможные оставшиеся бр-теги
+        final_text = final_text.replace("<br>", "").replace("<br/>", "").replace("<BR>", "")
+        
         user = get_user(message.from_user.id)
         user["history_posts"].append(final_text)
         
         await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
-        await message.answer(final_text, parse_mode="HTML", reply_markup=get_post_keyboard())
+        await message.answer(final_text, parse_pers="HTML", reply_markup=get_post_keyboard())
         
     except Exception as e:
         logging.error(f"❌ Ошибка обработки: {e}")
