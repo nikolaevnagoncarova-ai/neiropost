@@ -14,12 +14,17 @@ from openai import AsyncOpenAI
 # === НАСТРОЙКИ ===
 BOT_TOKEN = os.getenv("BOT_TOKEN", "токен_от_botfather")
 PAYMENT_TOKEN = os.getenv("PAYMENT_TOKEN", "токен_платежки_от_botfather")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "ключ_openai")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "ключ_groq")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://твое-название.onrender.com")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+# Настраиваем клиент на работу с бесплатным и мощным Groq API
+openai_client = AsyncOpenAI(
+    api_key=GROQ_API_KEY,
+    base_url="https://api.groq.com/openai/v1"
+)
 
 # === СОСТОЯНИЯ (FSM) ===
 class ChannelSetup(StatesGroup):
@@ -105,7 +110,6 @@ async def cmd_channel(message: types.Message, state: FSMContext):
 
 @dp.message(ChannelSetup.waiting_for_channel)
 async def process_channel_forward(message: types.Message, state: FSMContext):
-    # Проверяем, переслано ли сообщение из канала
     if message.forward_origin and message.forward_origin.type == "channel":
         channel_id = message.forward_origin.chat.id
         channel_title = message.forward_origin.chat.title
@@ -155,13 +159,14 @@ async def handle_voice(message: types.Message):
         file = await bot.get_file(message.voice.file_id)
         await bot.download_file(file.file_path, file_path)
 
+        # Распознавание речи через Whisper (версия large-v3 от Groq)
         with open(file_path, "rb") as audio_file:
             transcription = await openai_client.audio.transcriptions.create(
-                model="whisper-1", 
+                model="whisper-large-v3", 
                 file=audio_file
             )
         
-        # Улучшенный и строгий промпт
+        # Системный промпт для редактора
         prompt = (
             "Ты строгий и профессиональный коммерческий редактор. Твоя задача — превратить грязную аудио-расшифровку в чистый пост.\n"
             "Правила, которые нельзя нарушать:\n"
@@ -174,22 +179,21 @@ async def handle_voice(message: types.Message):
             f"Текст для обработки: {transcription.text}"
         )
         
+        # Генерация поста через Llama 3.3 (высокое качество и абсолютная бесплатность на Groq)
         response = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            temperature=0.4, # Снижаем фантазию нейросети для большей точности
+            model="llama-3.3-70b-versatile",
+            temperature=0.4,
             messages=[{"role": "user", "content": prompt}]
         )
         final_post = response.choices[0].message.content
 
-        # Добавляем примечание о триале, если нужно
         if access == "trial":
             use_trial(user_id)
             final_post += "\n\n_🔔 Это был бесплатный пост. Для безлимита: /buy_"
 
-        # Создаем кнопку публикации, если канал привязан
         user_data = get_user(user_id)
         keyboard = None
-        if user_data[2]: # Если есть channel_id
+        if user_data[2]:
             kb = [[InlineKeyboardButton(text="📢 Опубликовать в канал", callback_data="publish")]]
             keyboard = InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -214,15 +218,11 @@ async def process_publish(callback: types.CallbackQuery):
         return
         
     try:
-        # Отправляем текст самого сообщения в канал
         post_text = callback.message.text
-        # Очищаем приписку про бесплатный пост перед отправкой
         if "_🔔 Это был бесплатный пост" in post_text:
             post_text = post_text.split("\n\n_🔔 Это был бесплатный пост")[0]
             
         await bot.send_message(chat_id=channel_id, text=post_text)
-        
-        # Убираем кнопку под исходным сообщением
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.answer("✅ Успешно опубликовано!", show_alert=True)
     except Exception as e:
