@@ -62,10 +62,10 @@ def get_main_keyboard():
 def get_rules_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🔒 Политика конфиденциальности", url="https://telegra.ph/Politika-konfidencialnosti-08-01-83")
+            InlineKeyboardButton(text="🔒 Политика конфиденциальности", url="https://telegra.ph/Polzovatelskoe-Soglashenie-09-05-31")
         ],
         [
-            InlineKeyboardButton(text="📄 Пользовательское соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-01-39")
+            InlineKeyboardButton(text="📄 Пользовательское соглашение", url="https://telegra.ph/Polzovatelskoe-Soglashenie-09-05-31")
         ],
         [
             InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu_home")
