@@ -142,6 +142,8 @@ async def cmd_admin(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("admin_"))
 async def admin_handler(callback: types.CallbackQuery, state: FSMContext):
+    global users_db, GLOBAL_STATS, MAINTENANCE_MODE
+    
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("⛔ Отказано в доступе.", show_alert=True)
         return
@@ -155,7 +157,6 @@ async def admin_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_admin_keyboard())
         
     elif data == "admin_maintenance":
-        global MAINTENANCE_MODE
         MAINTENANCE_MODE = not MAINTENANCE_MODE
         status = "ВКЛЮЧЕНЫ 🔴" if MAINTENANCE_MODE else "ВЫКЛЮЧЕНЫ 🟢"
         await callback.answer(f"Технические работы {status}", show_alert=True)
@@ -181,7 +182,6 @@ async def admin_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.answer("✉️ Введите ID пользователя, которому хотите отправить сообщение:")
 
     elif data == "admin_clear_db":
-        global users_db
         users_db = {}
         GLOBAL_STATS["total_generated"] = 0
         await callback.answer("🗑 База данных сброшена!", show_alert=True)
