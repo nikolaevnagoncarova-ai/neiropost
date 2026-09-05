@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0)) # ID администратора
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 
 if not BOT_TOKEN or not GROQ_API_KEY or not WEBHOOK_URL:
     logging.error("❌ Не заданы обязательные переменные окружения!")
@@ -27,7 +27,6 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 openai_client = AsyncOpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
 
-# Глобальные переменные бота
 users_db = {}
 GLOBAL_STATS = {"total_generated": 0}
 MAINTENANCE_MODE = False
@@ -41,6 +40,8 @@ class AdminStates(StatesGroup):
     waiting_for_unvip_id = State()
     waiting_for_add_posts_id = State()
     waiting_for_add_posts_amount = State()
+    waiting_for_personal_id = State()
+    waiting_for_personal_text = State()
 
 def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -68,7 +69,8 @@ def get_post_keyboard():
             InlineKeyboardButton(text="👔 Строгий стиль", callback_data="action_formal")
         ],
         [
-            InlineKeyboardButton(text="🎨 Идея для картинки", callback_data="action_image_prompt")
+            InlineKeyboardButton(text="🌍 Перевод на EN", callback_data="action_translate_en"),
+            InlineKeyboardButton(text="🎨 Идея картинки", callback_data="action_image_prompt")
         ],
         [
             InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu_home")
@@ -78,12 +80,14 @@ def get_post_keyboard():
 def get_admin_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"),
-         InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
+         InlineKeyboardButton(text="📢 Рассылка всем", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="👑 Выдать VIP", callback_data="admin_give_vip"),
          InlineKeyboardButton(text="🚫 Забрать VIP", callback_data="admin_revoke_vip")],
         [InlineKeyboardButton(text="➕ Начислить посты", callback_data="admin_add_posts"),
-         InlineKeyboardButton(text="🛠 Тех. работы", callback_data="admin_maintenance")],
-        [InlineKeyboardButton(text="💾 Выгрузить базу (JSON)", callback_data="admin_backup")]
+         InlineKeyboardButton(text="✉️ Написать юзеру", callback_data="admin_personal_msg")],
+        [InlineKeyboardButton(text="🛠 Тех. работы", callback_data="admin_maintenance"),
+         InlineKeyboardButton(text="🗑 Очистить базу", callback_data="admin_clear_db")],
+        [InlineKeyboardButton(text="💾 Выгрузить бэкап", callback_data="admin_backup")]
     ])
 
 async def set_bot_commands(bot: Bot):
@@ -91,6 +95,8 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="start", description="Главное меню"),
         BotCommand(command="profile", description="Мой профиль"),
         BotCommand(command="channel", description="Привязать канал"),
+        BotCommand(command="saved", description="Избранные посты"),
+        BotCommand(command="history", description="История постов"),
         BotCommand(command="buy", description="Купить подписку"),
         BotCommand(command="admin", description="Админ панель")
     ]
@@ -106,7 +112,6 @@ def get_user(user_id):
             "history_posts": [],
             "last_generated_text": "" 
         }
-    # Автоматическая выдача безлимита админу
     if user_id == ADMIN_ID:
         users_db[user_id]["is_vip"] = True
     return users_db[user_id]
@@ -155,6 +160,16 @@ async def admin_handler(callback: types.CallbackQuery, state: FSMContext):
     elif data == "admin_add_posts":
         await state.set_state(AdminStates.waiting_for_add_posts_id)
         await callback.message.answer("➕ Отправьте ID пользователя для начисления постов:")
+
+    elif data == "admin_personal_msg":
+        await state.set_state(AdminStates.waiting_for_personal_id)
+        await callback.message.answer("✉️ Введите ID пользователя, которому хотите отправить сообщение:")
+
+    elif data == "admin_clear_db":
+        global users_db
+        users_db = {}
+        GLOBAL_STATS["total_generated"] = 0
+        await callback.answer("🗑 База данных сброшена!", show_alert=True)
         
     elif data == "admin_backup":
         db_json = json.dumps(users_db, ensure_ascii=False, indent=4)
@@ -175,16 +190,36 @@ async def process_broadcast(message: types.Message, state: FSMContext):
             pass
     await message.answer(f"✅ Рассылка завершена. Успешно отправлено: {sent} чел.")
 
+@dp.message(AdminStates.waiting_for_personal_id)
+async def process_personal_id(message: types.Message, state: FSMContext):
+    try:
+        target_id = int(message.text.strip())
+        await state.update_data(target_id=target_id)
+        await state.set_state(AdminStates.waiting_for_personal_text)
+        await message.answer("✍️ Теперь отправьте текст сообщения для этого пользователя:")
+    except ValueError:
+        await state.clear()
+        await message.answer("❌ ID должен состоять только из цифр.")
+
+@dp.message(AdminStates.waiting_for_personal_text)
+async def process_personal_text(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    await state.clear()
+    target_id = data['target_id']
+    try:
+        await bot.send_message(chat_id=target_id, text=f"💬 <b>Сообщение от администратора:</b>\n\n{message.text}", parse_mode="HTML")
+        await message.answer(f"✅ Сообщение успешно отправлено пользователю {target_id}!")
+    except Exception as e:
+        await message.answer(f"❌ Не удалось отправить сообщение: {e}")
+
 @dp.message(AdminStates.waiting_for_vip_id)
 async def process_give_vip(message: types.Message, state: FSMContext):
     await state.clear()
     try:
         target_id = int(message.text.strip())
-        if target_id in users_db:
-            users_db[target_id]["is_vip"] = True
-            await message.answer(f"✅ Пользователю {target_id} успешно выдан VIP.")
-        else:
-            await message.answer("⚠️ Пользователь не найден в базе.")
+        user = get_user(target_id)
+        user["is_vip"] = True
+        await message.answer(f"✅ Пользователю {target_id} успешно выдан VIP.")
     except ValueError:
         await message.answer("❌ ID должен состоять только из цифр.")
 
@@ -193,11 +228,9 @@ async def process_revoke_vip(message: types.Message, state: FSMContext):
     await state.clear()
     try:
         target_id = int(message.text.strip())
-        if target_id in users_db:
-            users_db[target_id]["is_vip"] = False
-            await message.answer(f"✅ У пользователя {target_id} отключен VIP.")
-        else:
-            await message.answer("⚠️ Пользователь не найден в базе.")
+        user = get_user(target_id)
+        user["is_vip"] = False
+        await message.answer(f"✅ У пользователя {target_id} отключен VIP.")
     except ValueError:
         await message.answer("❌ ID должен состоять только из цифр.")
 
@@ -205,13 +238,10 @@ async def process_revoke_vip(message: types.Message, state: FSMContext):
 async def process_add_posts_id(message: types.Message, state: FSMContext):
     try:
         target_id = int(message.text.strip())
-        if target_id in users_db:
-            await state.update_data(target_id=target_id)
-            await state.set_state(AdminStates.waiting_for_add_posts_amount)
-            await message.answer("Сколько постов начислить?")
-        else:
-            await state.clear()
-            await message.answer("⚠️ Пользователь не найден в базе.")
+        get_user(target_id)
+        await state.update_data(target_id=target_id)
+        await state.set_state(AdminStates.waiting_for_add_posts_amount)
+        await message.answer("Сколько постов начислить?")
     except ValueError:
         await state.clear()
         await message.answer("❌ ID должен состоять только из цифр.")
@@ -265,6 +295,31 @@ async def cmd_channel(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
 
+@dp.message(Command("saved"))
+async def cmd_saved(message: types.Message, state: FSMContext):
+    await state.clear()
+    user = get_user(message.from_user.id)
+    if not user["saved_posts"]:
+        await message.answer("⭐ У вас пока нет сохраненных постов.", reply_markup=get_main_keyboard())
+        return
+    text = "⭐ <b>Ваши избранные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["saved_posts"][-5:])
+    await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
+
+@dp.message(Command("history"))
+async def cmd_history(message: types.Message, state: FSMContext):
+    await state.clear()
+    user = get_user(message.from_user.id)
+    if not user["history_posts"]:
+        await message.answer("📜 Ваша история пуста. Вы еще не создавали посты.", reply_markup=get_main_keyboard())
+        return
+    text = "📜 <b>Последние сгенерированные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["history_posts"][-5:])
+    await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
+
+@dp.message(Command("buy"))
+async def cmd_buy(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("💳 Модуль оплаты находится на финальной стадии интеграции.", reply_markup=get_main_keyboard())
+
 @dp.message(ChannelStates.waiting_for_channel)
 async def process_channel_input(message: types.Message, state: FSMContext):
     user = get_user(message.from_user.id)
@@ -291,6 +346,18 @@ async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
     elif data == "menu_channel":
         await state.set_state(ChannelStates.waiting_for_channel)
         await callback.message.answer("📢 Отправьте @username канала.")
+    elif data == "menu_saved":
+        if not user["saved_posts"]:
+            await callback.answer("У вас пока нет сохраненных постов!", show_alert=True)
+            return
+        text = "⭐ <b>Ваши избранные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["saved_posts"][-5:])
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
+    elif data == "menu_history":
+        if not user["history_posts"]:
+            await callback.answer("История пуста!", show_alert=True)
+            return
+        text = "📜 <b>Последние сгенерированные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["history_posts"][-5:])
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
     elif data == "menu_buy":
         await callback.message.answer("💳 Чтобы снять лимиты, оплатите подписку (Интеграция скоро).")
     elif data == "menu_home":
@@ -332,6 +399,18 @@ async def action_handler(callback: types.CallbackQuery):
         except Exception:
             await callback.message.edit_text(post_text, parse_mode="HTML", reply_markup=get_post_keyboard())
             await callback.answer("❌ Ошибка генерации", show_alert=True)
+
+    elif callback.data == "action_translate_en":
+        await callback.message.edit_text("🌍 <i>Перевожу пост на английский...</i>", parse_mode="HTML")
+        prompt = f"Translate this Telegram post into professional, natural English suitable for an international channel. Keep the HTML tags (<b>, <i>, <code>) and emojis intact.\n\nPost:\n{post_text}"
+        try:
+            resp = await openai_client.chat.completions.create(model="openai/gpt-oss-20b", messages=[{"role": "user", "content": prompt}])
+            new_text = resp.choices[0].message.content.strip()
+            user["last_generated_text"] = new_text
+            await callback.message.edit_text(new_text, parse_mode="HTML", reply_markup=get_post_keyboard())
+        except Exception:
+            await callback.message.edit_text(post_text, parse_mode="HTML", reply_markup=get_post_keyboard())
+            await callback.answer("❌ Ошибка перевода", show_alert=True)
 
     elif callback.data == "action_image_prompt":
         await callback.message.answer("🎨 <i>Анализирую текст и создаю промпт...</i>", parse_mode="HTML")
