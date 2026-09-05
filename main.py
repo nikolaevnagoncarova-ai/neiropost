@@ -6,7 +6,7 @@ from io import BytesIO
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
-from aiogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
+from aiogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile, LabeledPrice, PreCheckoutQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -17,6 +17,7 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+PROVIDER_TOKEN = os.getenv("PROVIDER_TOKEN", "")  # Токен платежной системы (например, YooKassa через Telegram)
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 
 if not BOT_TOKEN or not GROQ_API_KEY or not WEBHOOK_URL:
@@ -81,10 +82,10 @@ def get_rules_keyboard():
 def get_buy_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📦 Базовый (15 генераций) — 200₽", callback_data="buy_tariff_1")
+            InlineKeyboardButton(text="📦 Базовый: 15 генераций — 200₽", callback_data="buy_tariff_1")
         ],
         [
-            InlineKeyboardButton(text="🚀 Pro (25 генераций) — 300₽", callback_data="buy_tariff_2")
+            InlineKeyboardButton(text="🚀 Pro: 25 генераций — 300₽", callback_data="buy_tariff_2")
         ],
         [
             InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu_home")
@@ -358,10 +359,10 @@ async def cmd_buy(message: types.Message, state: FSMContext):
     await state.clear()
     text = (
         "💳 <b>Покупка подписки</b>\n\n"
-        "Выберите подходящий тарифный план для увеличения количества генераций:\n\n"
+        "Выберите тарифный план для мгновенного начисления генераций:\n\n"
         "1️⃣ <b>Базовый</b> — 15 генераций (200₽)\n"
         "2️⃣ <b>Pro</b> — 25 генераций (300₽)\n\n"
-        "<i>Сумма будет списана с вашего баланса в боте. Если средств недостаточно, сначала пополните баланс.</i>"
+        "<i>Оплата спишется с вашего баланса в боте. Если средств недостаточно, пополните баланс.</i>"
     )
     await message.answer(text, parse_mode="HTML", reply_markup=get_buy_keyboard())
 
@@ -399,17 +400,45 @@ async def process_topup_amount(message: types.Message, state: FSMContext):
         amount = int(message.text.strip())
         if amount <= 0:
             raise ValueError
+        
+        if not PROVIDER_TOKEN:
+            await message.answer("❌ Платежный токен (PROVIDER_TOKEN) не настроен администратором в переменных окружения.", reply_markup=get_main_keyboard())
+            return
+
+        prices = [LabeledPrice(label="Пополнение баланса", amount=amount * 100)] # В копейках
+        await bot.send_invoice(
+            chat_id=message.chat.id,
+            title="Пополнение баланса",
+            description=f"Пополнение счета бота на сумму {amount} ₽",
+            payload=f"topup_{amount}",
+            provider_token=PROVIDER_TOKEN,
+            currency="RUB",
+            prices=prices,
+            start_parameter="topup-balance"
+        )
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите корректную сумму пополнения цифрами (например: 300).")
+
+@dp.pre_checkout_query()
+async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
+    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+@dp.message(F.successful_payment)
+async def successful_payment_handler(message: types.Message):
+    payment_info = message.successful_payment
+    payload = payment_info.invoice_payload
+    amount = payment_info.total_amount // 100 # Переводим обратно из копеек в рубли
+    
+    if payload.startswith("topup_"):
         user = get_user(message.from_user.id)
         user["balance"] += amount
         await message.answer(
-            f"✅ <b>Баланс успешно пополнен!</b>\n\n"
-            f"➕ Зачислено: <b>{amount} ₽</b>\n"
+            f"✅ <b>Оплата прошла успешно!</b>\n\n"
+            f"➕ Зачислено на баланс: <b>{amount} ₽</b>\n"
             f"💰 Ваш текущий баланс: <b>{user['balance']} ₽</b>",
             parse_mode="HTML",
             reply_markup=get_main_keyboard()
         )
-    except ValueError:
-        await message.answer("❌ Пожалуйста, введите корректную сумму пополнения цифрами (например: 300).")
 
 @dp.callback_query(F.data.startswith("menu_"))
 async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
@@ -439,10 +468,10 @@ async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
     elif data == "menu_buy":
         text = (
             "💳 <b>Покупка подписки</b>\n\n"
-            "Выберите подходящий тарифный план для увеличения количества генераций:\n\n"
+            "Выберите тарифный план для мгновенного начисления генераций:\n\n"
             "1️⃣ <b>Базовый</b> — 15 генераций (200₽)\n"
             "2️⃣ <b>Pro</b> — 25 генераций (300₽)\n\n"
-            "<i>Сумма будет списана с вашего баланса в боте. Если средств недостаточно, сначала пополните баланс.</i>"
+            "<i>Оплата спишется с вашего баланса в боте. Если средств недостаточно, пополните баланс.</i>"
         )
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_buy_keyboard())
     elif data == "menu_topup":
@@ -478,14 +507,14 @@ async def buy_tariff_handler(callback: types.CallbackQuery):
         return
 
     if user["balance"] < cost:
-        await callback.answer(f"❌ Недостаточно средств на балансе! Требуется: {cost}₽, у вас: {user['balance']}₽.", show_alert=True)
+        await callback.answer(f"❌ Недостаточно средств! Требуется: {cost}₽, на балансе: {user['balance']}₽.", show_alert=True)
         return
 
     user["balance"] -= cost
     user["posts_left"] += posts
     
     await callback.message.edit_text(
-        f"✅ <b>Подписка успешно приобретена!</b>\n\n"
+        f"✅ <b>Подписка успешно оформлена!</b>\n\n"
         f"📦 Тариф: <b>{name}</b>\n"
         f"➕ Начислено генераций: <b>+{posts}</b>\n"
         f"💰 Остаток на балансе: <b>{user['balance']} ₽</b>",
@@ -563,7 +592,7 @@ async def handle_voice(message: types.Message):
         return
 
     if not user["is_vip"] and user["posts_left"] <= 0:
-        await message.answer("⚠️ <b>У вас закончились бесплатные посты (Доступно: 0).</b>\nДля продолжения работы приобретите подписку или пополните баланс.", parse_mode="HTML", reply_markup=get_main_keyboard())
+        await message.answer("⚠️ <b>У вас закончились генерации (Доступно: 0).</b>\nПриобретите подписку или пополните баланс.", parse_mode="HTML", reply_markup=get_main_keyboard())
         return
 
     processing_msg = await message.answer("🎙 <i>Слушаю ваше голосовое сообщение и создаю шедевр... ✨</i>", parse_mode="HTML")
