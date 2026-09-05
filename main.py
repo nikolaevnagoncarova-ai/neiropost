@@ -34,6 +34,9 @@ MAINTENANCE_MODE = False
 class ChannelStates(StatesGroup):
     waiting_for_channel = State()
 
+class PaymentStates(StatesGroup):
+    waiting_for_amount = State()
+
 class AdminStates(StatesGroup):
     waiting_for_broadcast = State()
     waiting_for_vip_id = State()
@@ -55,6 +58,9 @@ def get_main_keyboard():
         ],
         [
             InlineKeyboardButton(text="💳 Подписка", callback_data="menu_buy"),
+            InlineKeyboardButton(text="➕ Пополнить", callback_data="menu_topup")
+        ],
+        [
             InlineKeyboardButton(text="⚖️ Правила", callback_data="menu_rules")
         ]
     ])
@@ -66,6 +72,19 @@ def get_rules_keyboard():
         ],
         [
             InlineKeyboardButton(text="📄 Пользовательское соглашение", url="https://telegra.ph/Polzovatelskoe-Soglashenie-09-05-31")
+        ],
+        [
+            InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu_home")
+        ]
+    ])
+
+def get_buy_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📦 Базовый (15 генераций) — 200₽", callback_data="buy_tariff_1")
+        ],
+        [
+            InlineKeyboardButton(text="🚀 Pro (25 генераций) — 300₽", callback_data="buy_tariff_2")
         ],
         [
             InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu_home")
@@ -112,6 +131,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="saved", description="Избранные посты"),
         BotCommand(command="history", description="История постов"),
         BotCommand(command="buy", description="Купить подписку"),
+        BotCommand(command="topup", description="Пополнить баланс"),
         BotCommand(command="rules", description="Правила и соглашения"),
         BotCommand(command="admin", description="Админ панель")
     ]
@@ -121,6 +141,7 @@ def get_user(user_id):
     if user_id not in users_db:
         users_db[user_id] = {
             "posts_left": 1, 
+            "balance": 0,
             "is_vip": False,
             "channel": None,
             "saved_posts": [],
@@ -294,6 +315,7 @@ async def cmd_profile(message: types.Message, state: FSMContext):
         f"<b>👤 Личный кабинет</b>\n\n"
         f"• <b>Ваш ID:</b> <code>{message.from_user.id}</code>\n"
         f"• <b>Статус:</b> {status}\n"
+        f"• <b>Баланс:</b> {user['balance']} ₽\n"
         f"• <b>Доступно генераций:</b> {user['posts_left']}\n"
         f"• <b>Канал:</b> {user['channel'] or 'Не привязан'}\n"
         f"• <b>Сохранено постов:</b> {len(user['saved_posts'])}\n\n"
@@ -334,7 +356,23 @@ async def cmd_history(message: types.Message, state: FSMContext):
 @dp.message(Command("buy"))
 async def cmd_buy(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("💳 Модуль оплаты находится на финальной стадии интеграции.", reply_markup=get_main_keyboard())
+    text = (
+        "💳 <b>Покупка подписки</b>\n\n"
+        "Выберите подходящий тарифный план для увеличения количества генераций:\n\n"
+        "1️⃣ <b>Базовый</b> — 15 генераций (200₽)\n"
+        "2️⃣ <b>Pro</b> — 25 генераций (300₽)\n\n"
+        "<i>Сумма будет списана с вашего баланса в боте. Если средств недостаточно, сначала пополните баланс.</i>"
+    )
+    await message.answer(text, parse_mode="HTML", reply_markup=get_buy_keyboard())
+
+@dp.message(Command("topup"))
+async def cmd_topup(message: types.Message, state: FSMContext):
+    await state.set_state(PaymentStates.waiting_for_amount)
+    await message.answer(
+        "💳 <b>Пополнение баланса</b>\n\n"
+        "Введите сумму для пополнения в рублях (например: <code>300</code>):",
+        parse_mode="HTML"
+    )
 
 @dp.message(Command("rules"))
 async def cmd_rules(message: types.Message, state: FSMContext):
@@ -354,6 +392,25 @@ async def process_channel_input(message: types.Message, state: FSMContext):
         await state.clear()
         await message.answer(f"✅ Канал <b>{user['channel']}</b> успешно сохранен!", parse_mode="HTML", reply_markup=get_main_keyboard())
 
+@dp.message(PaymentStates.waiting_for_amount)
+async def process_topup_amount(message: types.Message, state: FSMContext):
+    await state.clear()
+    try:
+        amount = int(message.text.strip())
+        if amount <= 0:
+            raise ValueError
+        user = get_user(message.from_user.id)
+        user["balance"] += amount
+        await message.answer(
+            f"✅ <b>Баланс успешно пополнен!</b>\n\n"
+            f"➕ Зачислено: <b>{amount} ₽</b>\n"
+            f"💰 Ваш текущий баланс: <b>{user['balance']} ₽</b>",
+            parse_mode="HTML",
+            reply_markup=get_main_keyboard()
+        )
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите корректную сумму пополнения цифрами (например: 300).")
+
 @dp.callback_query(F.data.startswith("menu_"))
 async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
@@ -362,7 +419,7 @@ async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
     
     if data == "menu_profile":
         status = "👑 VIP" if user["is_vip"] else "⏳ Базовый"
-        text = f"<b>👤 Личный кабинет</b>\n\n• <b>ID:</b> <code>{callback.from_user.id}</code>\n• <b>Статус:</b> {status}\n• <b>Генераций:</b> {user['posts_left']}\n• <b>Канал:</b> {user['channel'] or 'Не привязан'}"
+        text = f"<b>👤 Личный кабинет</b>\n\n• <b>ID:</b> <code>{callback.from_user.id}</code>\n• <b>Статус:</b> {status}\n• <b>Баланс:</b> {user['balance']} ₽\n• <b>Генераций:</b> {user['posts_left']}\n• <b>Канал:</b> {user['channel'] or 'Не привязан'}"
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
     elif data == "menu_channel":
         await state.set_state(ChannelStates.waiting_for_channel)
@@ -380,7 +437,17 @@ async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
         text = "📜 <b>Последние сгенерированные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["history_posts"][-5:])
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
     elif data == "menu_buy":
-        await callback.message.answer("💳 Чтобы снять лимиты, приобретите подписку (Интеграция скоро).")
+        text = (
+            "💳 <b>Покупка подписки</b>\n\n"
+            "Выберите подходящий тарифный план для увеличения количества генераций:\n\n"
+            "1️⃣ <b>Базовый</b> — 15 генераций (200₽)\n"
+            "2️⃣ <b>Pro</b> — 25 генераций (300₽)\n\n"
+            "<i>Сумма будет списана с вашего баланса в боте. Если средств недостаточно, сначала пополните баланс.</i>"
+        )
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_buy_keyboard())
+    elif data == "menu_topup":
+        await state.set_state(PaymentStates.waiting_for_amount)
+        await callback.message.answer("💳 Введите сумму для пополнения в рублях (например: <code>300</code>):", parse_mode="HTML")
     elif data == "menu_rules":
         await callback.message.edit_text("⚖️ <b>Правила и документация сервиса:</b>\n\nОзнакомьтесь с политикой конфиденциальности и пользовательским соглашением ниже 👇", parse_mode="HTML", reply_markup=get_rules_keyboard())
     elif data == "menu_home":
@@ -391,6 +458,40 @@ async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
             "Выберите нужный раздел в меню ниже 👇"
         )
         await callback.message.edit_text(home_text, parse_mode="HTML", reply_markup=get_main_keyboard())
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("buy_tariff_"))
+async def buy_tariff_handler(callback: types.CallbackQuery):
+    user = get_user(callback.from_user.id)
+    tariff = callback.data.split("_")[-1]
+    
+    if tariff == "1":
+        cost = 200
+        posts = 15
+        name = "Базовый (15 генераций)"
+    elif tariff == "2":
+        cost = 300
+        posts = 25
+        name = "Pro (25 генераций)"
+    else:
+        await callback.answer("❌ Неизвестный тариф", show_alert=True)
+        return
+
+    if user["balance"] < cost:
+        await callback.answer(f"❌ Недостаточно средств на балансе! Требуется: {cost}₽, у вас: {user['balance']}₽.", show_alert=True)
+        return
+
+    user["balance"] -= cost
+    user["posts_left"] += posts
+    
+    await callback.message.edit_text(
+        f"✅ <b>Подписка успешно приобретена!</b>\n\n"
+        f"📦 Тариф: <b>{name}</b>\n"
+        f"➕ Начислено генераций: <b>+{posts}</b>\n"
+        f"💰 Остаток на балансе: <b>{user['balance']} ₽</b>",
+        parse_mode="HTML",
+        reply_markup=get_main_keyboard()
+    )
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("action_"))
@@ -462,7 +563,7 @@ async def handle_voice(message: types.Message):
         return
 
     if not user["is_vip"] and user["posts_left"] <= 0:
-        await message.answer("⚠️ <b>У вас закончились бесплатные посты (Доступно: 0).</b>\nДля продолжения работы приобретите подписку.", parse_mode="HTML", reply_markup=get_main_keyboard())
+        await message.answer("⚠️ <b>У вас закончились бесплатные посты (Доступно: 0).</b>\nДля продолжения работы приобретите подписку или пополните баланс.", parse_mode="HTML", reply_markup=get_main_keyboard())
         return
 
     processing_msg = await message.answer("🎙 <i>Слушаю ваше голосовое сообщение и создаю шедевр... ✨</i>", parse_mode="HTML")
