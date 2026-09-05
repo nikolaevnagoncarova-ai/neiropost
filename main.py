@@ -279,7 +279,8 @@ async def cmd_start(message: types.Message, state: FSMContext):
     get_user(message.from_user.id)
     text = (
         "✨ <b>Добро пожаловать в ИИ-Редактор Pro!</b>\n\n"
-        "🎙 <b>Опишите голосовым любые мысли</b>, а я превращу их в шикарный пост.\n\n"
+        "🎙 <b>Превратите любые мысли в идеальный пост за пару секунд.</b>\n"
+        "Просто запишите голосовое сообщение с наброском вашей идеи, истории или тезисами, а искусственный интеллект автоматически проанализирует аудио, структурирует текст, расставит стильные акценты и подготовит готовый материал для публикации в Telegram.\n\n"
         "Выберите нужный раздел в меню ниже 👇"
     )
     await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
@@ -296,7 +297,7 @@ async def cmd_profile(message: types.Message, state: FSMContext):
         f"• <b>Доступно генераций:</b> {user['posts_left']}\n"
         f"• <b>Канал:</b> {user['channel'] or 'Не привязан'}\n"
         f"• <b>Сохранено постов:</b> {len(user['saved_posts'])}\n\n"
-        f"<i>Запишите голосовое сообщение, чтобы создать контент.</i>"
+        f"<i>Запишите голосовое сообщение, чтобы создать новый контент.</i>"
     )
     await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
 
@@ -305,7 +306,7 @@ async def cmd_channel(message: types.Message, state: FSMContext):
     await state.set_state(ChannelStates.waiting_for_channel)
     await message.answer(
         "📢 <b>Привязка канала:</b>\n\n"
-        "1. Добавьте этого бота в администраторы канала.\n"
+        "1. Добавьте этого бота в администраторы вашего канала.\n"
         "2. Перешлите сюда любое сообщение из него или отправьте <code>@username</code>.",
         parse_mode="HTML"
     )
@@ -315,7 +316,7 @@ async def cmd_saved(message: types.Message, state: FSMContext):
     await state.clear()
     user = get_user(message.from_user.id)
     if not user["saved_posts"]:
-        await message.answer("⭐ У вас пока нет сохраненных постов.", reply_markup=get_main_keyboard())
+        await message.answer("⭐ У вас пока нет сохраненных постов в избранном.", reply_markup=get_main_keyboard())
         return
     text = "⭐ <b>Ваши избранные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["saved_posts"][-5:])
     await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
@@ -347,11 +348,11 @@ async def process_channel_input(message: types.Message, state: FSMContext):
         target = f"@{message.forward_origin.chat.username}" if message.forward_origin.chat.username else str(message.forward_origin.chat.id)
         user["channel"] = target
         await state.clear()
-        await message.answer(f"✅ Канал привязан!", reply_markup=get_main_keyboard())
+        await message.answer(f"✅ Канал успешно привязан!", reply_markup=get_main_keyboard())
     elif message.text and message.text.startswith("@"):
         user["channel"] = message.text.strip()
         await state.clear()
-        await message.answer(f"✅ Канал <b>{user['channel']}</b> сохранен!", parse_mode="HTML", reply_markup=get_main_keyboard())
+        await message.answer(f"✅ Канал <b>{user['channel']}</b> успешно сохранен!", parse_mode="HTML", reply_markup=get_main_keyboard())
 
 @dp.callback_query(F.data.startswith("menu_"))
 async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
@@ -361,11 +362,11 @@ async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
     
     if data == "menu_profile":
         status = "👑 VIP" if user["is_vip"] else "⏳ Базовый"
-        text = f"<b>👤 Кабинет</b>\n\n• <b>ID:</b> <code>{callback.from_user.id}</code>\n• <b>Статус:</b> {status}\n• <b>Генераций:</b> {user['posts_left']}\n• <b>Канал:</b> {user['channel'] or 'Нет'}"
+        text = f"<b>👤 Личный кабинет</b>\n\n• <b>ID:</b> <code>{callback.from_user.id}</code>\n• <b>Статус:</b> {status}\n• <b>Генераций:</b> {user['posts_left']}\n• <b>Канал:</b> {user['channel'] or 'Не привязан'}"
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
     elif data == "menu_channel":
         await state.set_state(ChannelStates.waiting_for_channel)
-        await callback.message.answer("📢 Отправьте @username канала.")
+        await callback.message.answer("📢 Отправьте @username канала или перешлите сообщение из него.")
     elif data == "menu_saved":
         if not user["saved_posts"]:
             await callback.answer("У вас пока нет сохраненных постов!", show_alert=True)
@@ -379,11 +380,17 @@ async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
         text = "📜 <b>Последние сгенерированные посты:</b>\n\n" + "\n\n➖➖➖➖➖➖\n\n".join(user["history_posts"][-5:])
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
     elif data == "menu_buy":
-        await callback.message.answer("💳 Чтобы снять лимиты, оплатите подписку (Интеграция скоро).")
+        await callback.message.answer("💳 Чтобы снять лимиты, приобретите подписку (Интеграция скоро).")
     elif data == "menu_rules":
         await callback.message.edit_text("⚖️ <b>Правила и документация сервиса:</b>\n\nОзнакомьтесь с политикой конфиденциальности и пользовательским соглашением ниже 👇", parse_mode="HTML", reply_markup=get_rules_keyboard())
     elif data == "menu_home":
-        await callback.message.edit_text("✨ <b>ИИ-Редактор Pro</b>\nЖду ваше голосовое сообщение!", parse_mode="HTML", reply_markup=get_main_keyboard())
+        home_text = (
+            "✨ <b>ИИ-Редактор Pro</b>\n\n"
+            "🎙 <b>Превратите любые мысли в идеальный пост за пару секунд.</b>\n"
+            "Просто запишите голосовое сообщение с наброском вашей идеи, истории или тезисами, а искусственный интеллект автоматически проанализирует аудио, структурирует текст, расставит стильные акценты и подготовит готовый материал для публикации в Telegram.\n\n"
+            "Выберите нужный раздел в меню ниже 👇"
+        )
+        await callback.message.edit_text(home_text, parse_mode="HTML", reply_markup=get_main_keyboard())
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("action_"))
@@ -394,22 +401,22 @@ async def action_handler(callback: types.CallbackQuery):
     if callback.data == "action_save":
         if post_text not in user["saved_posts"]:
             user["saved_posts"].append(post_text)
-            await callback.answer("✅ Успешно сохранено!", show_alert=True)
+            await callback.answer("✅ Успешно сохранено в избранное!", show_alert=True)
         else:
-            await callback.answer("ℹ️ Уже в избранном.", show_alert=True)
+            await callback.answer("ℹ️ Этот пост уже есть в избранном.", show_alert=True)
             
     elif callback.data == "action_publish":
         if not user["channel"]:
-            await callback.answer("❌ Сначала привяжите канал!", show_alert=True)
+            await callback.answer("❌ Сначала привяжите канал через меню!", show_alert=True)
             return
         try:
             await bot.send_message(chat_id=user["channel"], text=post_text, parse_mode="HTML")
-            await callback.answer("✅ Опубликовано!", show_alert=True)
+            await callback.answer("✅ Успешно опубликовано в канал!", show_alert=True)
         except Exception:
-            await callback.answer("❌ Ошибка публикации. Бот админ?", show_alert=True)
+            await callback.answer("❌ Ошибка публикации. Убедитесь, что бот администратор канала.", show_alert=True)
 
     elif callback.data in ["action_funny", "action_formal"]:
-        await callback.message.edit_text("🔄 <i>Переписываю текст...</i>", parse_mode="HTML")
+        await callback.message.edit_text("🔄 <i>Переписываю текст в новом стиле...</i>", parse_mode="HTML")
         style = "максимально смешным, ироничным и фановым" if callback.data == "action_funny" else "строгим, экспертным и официально-деловым"
         
         prompt = f"Перепиши этот пост, сделав его {style}. Сохрани HTML-разметку (<b>, <i>, <code>) и суть, не используй <br>.\n\nТекст:\n{post_text}"
@@ -423,7 +430,7 @@ async def action_handler(callback: types.CallbackQuery):
             await callback.answer("❌ Ошибка генерации", show_alert=True)
 
     elif callback.data == "action_translate_en":
-        await callback.message.edit_text("🌍 <i>Перевожу пост на английский...</i>", parse_mode="HTML")
+        await callback.message.edit_text("🌍 <i>Перевожу пост на английский язык...</i>", parse_mode="HTML")
         prompt = f"Translate this Telegram post into professional, natural English suitable for an international channel. Keep the HTML tags (<b>, <i>, <code>) and emojis intact.\n\nPost:\n{post_text}"
         try:
             resp = await openai_client.chat.completions.create(model="openai/gpt-oss-20b", messages=[{"role": "user", "content": prompt}])
@@ -435,7 +442,7 @@ async def action_handler(callback: types.CallbackQuery):
             await callback.answer("❌ Ошибка перевода", show_alert=True)
 
     elif callback.data == "action_image_prompt":
-        await callback.message.answer("🎨 <i>Анализирую текст и создаю промпт...</i>", parse_mode="HTML")
+        await callback.message.answer("🎨 <i>Анализирую текст и создаю промпт для картинки...</i>", parse_mode="HTML")
         prompt = f"Напиши один идеальный промпт на английском языке для Midjourney/DALL-E, чтобы сгенерировать крутую иллюстрацию к этому посту. Только сам промпт, без лишних слов.\n\nПост:\n{post_text}"
         try:
             resp = await openai_client.chat.completions.create(model="openai/gpt-oss-20b", messages=[{"role": "user", "content": prompt}])
@@ -451,14 +458,14 @@ async def handle_voice(message: types.Message):
     user = get_user(message.from_user.id)
     
     if MAINTENANCE_MODE and message.from_user.id != ADMIN_ID:
-        await message.answer("🛠 <b>Бот на техническом обслуживании.</b>\nПожалуйста, подождите, мы выкатываем обновление!", parse_mode="HTML")
+        await message.answer("🛠 <b>Бот временно находится на техническом обслуживании.</b>\nПожалуйста, подождите немного, мы скоро вернемся!", parse_mode="HTML")
         return
 
     if not user["is_vip"] and user["posts_left"] <= 0:
-        await message.answer("⚠️ <b>У вас закончились бесплатные посты (Доступно: 0).</b>\nДля продолжения приобретите подписку.", parse_mode="HTML", reply_markup=get_main_keyboard())
+        await message.answer("⚠️ <b>У вас закончились бесплатные посты (Доступно: 0).</b>\nДля продолжения работы приобретите подписку.", parse_mode="HTML", reply_markup=get_main_keyboard())
         return
 
-    processing_msg = await message.answer("🎙 <i>Слушаю аудио и создаю шедевр... ✨</i>", parse_mode="HTML")
+    processing_msg = await message.answer("🎙 <i>Слушаю ваше голосовое сообщение и создаю шедевр... ✨</i>", parse_mode="HTML")
     
     voice = message.voice
     file_info = await bot.get_file(voice.file_id)
@@ -472,7 +479,7 @@ async def handle_voice(message: types.Message):
         raw_text = transcript.text.strip()
         if not raw_text:
             await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
-            await message.answer("⚠️ Речь не распознана.")
+            await message.answer("⚠️ К сожалению, речь не удалось распознать. Попробуйте записать еще раз.")
             return
 
         prompt = (
@@ -505,7 +512,7 @@ async def handle_voice(message: types.Message):
         logging.error(f"❌ Ошибка: {e}")
         try: await bot.delete_message(chat_id=message.chat.id, message_id=processing_msg.message_id)
         except: pass
-        await message.answer("❌ Произошла ошибка при обработке.")
+        await message.answer("❌ Произошла ошибка при обработке вашего аудио.")
     finally:
         if os.path.exists(audio_file_path):
             os.remove(audio_file_path)
