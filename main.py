@@ -54,7 +54,21 @@ def get_main_keyboard():
             InlineKeyboardButton(text="📜 История", callback_data="menu_history")
         ],
         [
-            InlineKeyboardButton(text="💳 Подписка", callback_data="menu_buy")
+            InlineKeyboardButton(text="💳 Подписка", callback_data="menu_buy"),
+            InlineKeyboardButton(text="⚖️ Правила", callback_data="menu_rules")
+        ]
+    ])
+
+def get_rules_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔒 Политика конфиденциальности", url="https://telegra.ph/Politika-konfidencialnosti-08-01-83")
+        ],
+        [
+            InlineKeyboardButton(text="📄 Пользовательское соглашение", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-01-39")
+        ],
+        [
+            InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu_home")
         ]
     ])
 
@@ -98,6 +112,7 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="saved", description="Избранные посты"),
         BotCommand(command="history", description="История постов"),
         BotCommand(command="buy", description="Купить подписку"),
+        BotCommand(command="rules", description="Правила и соглашения"),
         BotCommand(command="admin", description="Админ панель")
     ]
     await bot.set_my_commands(commands)
@@ -320,6 +335,11 @@ async def cmd_buy(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("💳 Модуль оплаты находится на финальной стадии интеграции.", reply_markup=get_main_keyboard())
 
+@dp.message(Command("rules"))
+async def cmd_rules(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("⚖️ <b>Правила и документация сервиса:</b>\n\nОзнакомьтесь с политикой конфиденциальности и пользовательским соглашением ниже 👇", parse_mode="HTML", reply_markup=get_rules_keyboard())
+
 @dp.message(ChannelStates.waiting_for_channel)
 async def process_channel_input(message: types.Message, state: FSMContext):
     user = get_user(message.from_user.id)
@@ -360,6 +380,8 @@ async def menu_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_keyboard())
     elif data == "menu_buy":
         await callback.message.answer("💳 Чтобы снять лимиты, оплатите подписку (Интеграция скоро).")
+    elif data == "menu_rules":
+        await callback.message.edit_text("⚖️ <b>Правила и документация сервиса:</b>\n\nОзнакомьтесь с политикой конфиденциальности и пользовательским соглашением ниже 👇", parse_mode="HTML", reply_markup=get_rules_keyboard())
     elif data == "menu_home":
         await callback.message.edit_text("✨ <b>ИИ-Редактор Pro</b>\nЖду ваше голосовое сообщение!", parse_mode="HTML", reply_markup=get_main_keyboard())
     await callback.answer()
